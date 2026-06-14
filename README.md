@@ -145,8 +145,8 @@ meu-projeto/
 ```yaml
 services:
   meu-projeto:
-    build: .
-    container_name: meu-projeto
+    image: ghcr.io/fcoelopes/<nome_repositorio_github>:latest
+    container_name: portfolio
     restart: unless-stopped
     expose:
       - "80"              # porta que a app escuta internamente
@@ -156,7 +156,7 @@ services:
       - "traefik.enable=true"
       # Trocar meu-projeto pelo nome do router (único entre todos os projetos)
       # Trocar o subdomínio pelo desejado
-      - "traefik.http.routers.meu-projeto.rule=Host(`meu-projeto.intops.tec.br`)"
+      - "traefik.http.routers.meu-projeto.rule=Host(`meu-projeto.fcoelds.dev.br`)"
       - "traefik.http.routers.meu-projeto.entrypoints=websecure"
       - "traefik.http.routers.meu-projeto.tls.certresolver=cloudflare"
       - "traefik.http.services.meu-projeto.loadbalancer.server.port=80"
@@ -203,6 +203,60 @@ Configurar em: Settings > Secrets and variables > Actions
 | `VPS_HOST`    | IP da VPS (ex: 94.130.149.144) |
 | `VPS_USER`    | Usuário SSH (ex: root)         |
 | `VPS_SSH_KEY` | Chave SSH privada              |
+
+
+### Deploy
+```yaml
+name: Deploy
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and push
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          no-cache: true
+          tags: ghcr.io/${{ github.repository }}:latest
+
+  deploy:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy na VPS via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          script: |
+            # Puxa a nova imagem que acabamos de subir
+            docker pull ghcr.io/${{ github.repository }}:latest
+            
+            # Recria o container (o docker compose já se encarrega de substituir o antigo)
+            docker compose up -d
+            
+            # Limpeza rápida
+            docker image prune -f
+
+            # Recria o container forçando a atualização total
+            docker compose up -d --force-recreate
+
+```
 
 ### Como gerar a chave SSH para o GitHub Actions
 
