@@ -1,0 +1,7 @@
+# Secrets and sensitive files
+auth/htpasswd
+.env
+acme.json
+
+# Application folders
+portfolio_app/
