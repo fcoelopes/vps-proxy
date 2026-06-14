@@ -1,6 +1,6 @@
 services:
   traefik:
-    image: traefik:v3.1
+    image: traefik:v3.7.5
     container_name: traefik
     restart: unless-stopped
     ports:
@@ -8,22 +8,24 @@ services:
       - "443:443"
     environment:
       - CF_DNS_API_TOKEN=${CF_DNS_API_TOKEN}
+      - EMAIL=${EMAIL}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - ./traefik.yml:/etc/traefik/traefik.yml:ro
+      - ./dynamic.yml:/etc/traefik/dynamic.yml:ro
       - ./acme.json:/acme.json
       - ./auth/htpasswd:/etc/traefik/htpasswd:ro
     networks:
       - proxy
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.dashboard.rule=Host(`traefik.intops.tec.br`)"
+      - "traefik.http.routers.dashboard.rule=Host(`traefik.fcoelds.dev.br`)"
       - "traefik.http.routers.dashboard.entrypoints=websecure"
       - "traefik.http.routers.dashboard.tls.certresolver=cloudflare"
-      - "traefik.http.routers.dashboard.tls.domains[0].main=intops.tec.br"
-      - "traefik.http.routers.dashboard.tls.domains[0].sans=*.intops.tec.br"
+      - "traefik.http.routers.dashboard.tls.domains[0].main=fcoelds.dev.br"
+      - "traefik.http.routers.dashboard.tls.domains[0].sans=*.fcoelds.dev.br"
       - "traefik.http.routers.dashboard.service=api@internal"
-      - "traefik.http.routers.dashboard.middlewares=auth"
+      - "traefik.http.routers.dashboard.middlewares=auth@file"
 
 networks:
   proxy:

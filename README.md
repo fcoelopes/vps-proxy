@@ -9,9 +9,9 @@ Reverse proxy centralizado com Traefik. Fica rodando na VPS e roteia o tráfego 
 Você tem uma VPS com um único IP. Quer colocar vários projetos nela e acessar cada um por um subdomínio diferente:
 
 ```
-epi.intops.tec.br     →  EPI Control
-arcflash.intops.tec.br →  ArcFlash NR-10
-rbd.intops.tec.br     →  rbd-graph
+projeto#1.fcoelds.dev.br     →  EPI Control
+projeto#2.fcoelds.dev.br     →  ArcFlash NR-10
+projeto#3.fcoleds.tec.br     →  rbd-graph
 ```
 
 O Traefik fica na porta 80/443, intercepta todas as requisições e encaminha para o container certo baseado no domínio. Você sobe um projeto novo e o Traefik detecta automaticamente — sem editar nenhum arquivo de configuração central.
@@ -81,20 +81,14 @@ Permissões necessárias no token:
 
 ### 5. Gerar senha para o dashboard
 
-O dashboard do Traefik fica em `traefik.intops.tec.br` e é protegido por usuário e senha. Para gerar o hash:
+O dashboard do Traefik fica em `traefik.fcoleds.dev.br` e é protegido por usuário e senha. Para gerar o hash:
 
 ```bash
 # Instalar htpasswd se não tiver
 apt install apache2-utils -y
 
 # Gerar hash (vai pedir a senha duas vezes)
-echo $(htpasswd -nB admin) | sed -e 's/\$/\$\$/g'
-```
-
-Copiar o resultado e colar no `docker-compose.yml` substituindo `HASH_AQUI`:
-
-```yaml
-- "traefik.http.middlewares.auth.basicauth.users=admin:$$2y$$05$$SEU_HASH_AQUI"
+sudo htpasswd -cB /srv/proxy/auth/htpasswd admin
 ```
 
 ### 6. Trocar os placeholders no traefik.yml
@@ -105,7 +99,7 @@ email: seuemail@exemplo.com   # trocar pelo seu email real
 
 ### 7. Trocar os placeholders no docker-compose.yml
 
-Substituir todas as ocorrências de `intops.tec.br` pelo domínio real.
+Substituir todas as ocorrências de `fcoelds.dev.br` pelo domínio real.
 
 ### 8. Subir o Traefik
 
@@ -126,8 +120,8 @@ Criar dois registros A apontando para o IP da VPS:
 
 | Tipo | Nome                | Conteúdo    | Proxy   |
 |------|---------------------|-------------|---------|
-| A    | intops.tec.br   | IP_DA_VPS   | ☁️ On  |
-| A    | *.intops.tec.br | IP_DA_VPS   | ☁️ On  |
+| A    | intops.tec.br       | IP_DA_VPS   |  ☁️ On  |
+| A    | *.intops.tec.br     | IP_DA_VPS   |  ☁️ On  |
 
 O registro wildcard (`*`) faz com que qualquer subdomínio resolva automaticamente para a VPS.
 
@@ -174,7 +168,7 @@ networks:
 
 **As 3 coisas que mudam para cada projeto:**
 1. Nome do router (`meu-projeto`) — deve ser único, use o nome do projeto
-2. Subdomínio (`meu-projeto.intops.tec.br`)
+2. Subdomínio (`meu-projeto.fcoelds.dev.br`)
 3. Porta interna (`8000`) — a porta que a app escuta dentro do container
 
 ### Passo 3 — Clonar e subir na VPS
