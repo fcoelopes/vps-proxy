@@ -149,7 +149,7 @@ services:
     container_name: meu-projeto
     restart: unless-stopped
     expose:
-      - "8000"              # porta que a app escuta internamente
+      - "80"              # porta que a app escuta internamente
     networks:
       - proxy
     labels:
@@ -159,7 +159,7 @@ services:
       - "traefik.http.routers.meu-projeto.rule=Host(`meu-projeto.intops.tec.br`)"
       - "traefik.http.routers.meu-projeto.entrypoints=websecure"
       - "traefik.http.routers.meu-projeto.tls.certresolver=cloudflare"
-      - "traefik.http.services.meu-projeto.loadbalancer.server.port=8000"
+      - "traefik.http.services.meu-projeto.loadbalancer.server.port=80"
 
 networks:
   proxy:
