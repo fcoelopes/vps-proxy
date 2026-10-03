@@ -1,4 +1,10 @@
 http:
+  serversTransports:
+    legacy-tls:
+      # Compatibilidade temporária para rollback de stacks que ainda
+      # terminavam TLS no próprio nginx antes da borda compartilhada.
+      insecureSkipVerify: true
+
   middlewares:
     auth:
       basicAuth:
