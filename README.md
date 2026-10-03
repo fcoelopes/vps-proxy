@@ -1,307 +1,204 @@
-# infra-proxy
+# vps-proxy
 
-Reverse proxy centralizado com Traefik. Fica rodando na VPS e roteia o tráfego para cada ferramenta pelo subdomínio.
+Bootstrap e contrato operacional para hosts que executam aplicações do
+ecossistema Arc.
 
----
+A ideia é simples: a origem da VM pode ser **AWS, Contabo, Hetzner, OCI ou
+outro provedor**, mas depois do bootstrap o host deve parecer igual para
+ArcLab, ArcPRESS, Clarc e os próximos projetos.
 
-## O que é isso e por que existe
+O Traefik continua neste repositório, mas agora é **um componente da plataforma
+do host**, não a finalidade inteira do projeto.
 
-Você tem uma VPS com um único IP. Quer colocar vários projetos nela e acessar cada um por um subdomínio diferente:
+## O que o repositório prepara
 
+```text
+VM Ubuntu/Debian limpa
+        │
+        ▼
+bootstrap.sh
+        │
+        ├── usuário de operação não-root
+        ├── Docker Engine + Compose
+        ├── rotação de logs Docker
+        ├── unattended security upgrades
+        ├── swap
+        ├── UFW: SSH + 80 + 443
+        ├── /srv/arc/{apps,data,backups}
+        ├── rede Docker externa "proxy"
+        └── opcional: Traefik + Let's Encrypt
+                        │
+                        ▼
+                  ARC-READY HOST
+                        │
+           ┌────────────┼────────────┐
+           ▼            ▼            ▼
+        ArcLab       ArcPRESS       Clarc
 ```
-projeto#1.fcoelds.dev.br     →  EPI Control
-projeto#2.fcoelds.dev.br     →  ArcFlash NR-10
-projeto#3.fcoleds.tec.br     →  rbd-graph
-```
 
-O Traefik fica na porta 80/443, intercepta todas as requisições e encaminha para o container certo baseado no domínio. Você sobe um projeto novo e o Traefik detecta automaticamente — sem editar nenhum arquivo de configuração central.
+O estado final está definido em [docs/HOST_CONTRACT.md](docs/HOST_CONTRACT.md).
 
----
+## Providers
 
-## Estrutura na VPS
+Os provedores mudam a forma de **criar** a VM e abrir o firewall externo. O
+bootstrap do sistema operacional é o mesmo.
 
-```
-/srv/
-├── proxy/                    ← este repositório
-│   ├── docker-compose.yml
-│   ├── traefik.yml
-│   ├── acme.json             ← gerado automaticamente (NÃO commitar)
-│   └── .env                  ← token Cloudflare (NÃO commitar)
-│
-├── epi-control/              ← cada projeto no seu diretório
-├── arcflash/
-├── rbd-graph/
-└── exemplo-app/
-```
+Guias:
 
-Cada projeto é um repositório Git independente clonado em `/srv/nome-do-projeto`.
+- [AWS EC2](providers/aws.md)
+- [Contabo](providers/contabo.md)
+- [Hetzner Cloud](providers/hetzner.md)
+- [OCI](providers/oci.md)
 
----
+O repositório não tenta esconder diferenças de cloud: Security Group, NSG/VCN,
+firewall Hetzner, IP elástico e afins continuam sendo responsabilidade da
+camada do provedor. O objetivo aqui é normalizar o host depois que o SSH existe.
 
-## Setup inicial (fazer uma única vez)
+## Bootstrap
 
-### 1. Clonar o repositório na VPS
+Exemplo em uma Contabo limpa:
 
 ```bash
-git clone git@github.com:fcoelopes/infra-proxy.git /srv/proxy
-cd /srv/proxy
+git clone git@github.com:fcoelopes/vps-proxy.git
+cd vps-proxy
+
+sudo bash ./bootstrap.sh \
+  --provider contabo \
+  --user arc \
+  --edge \
+  --dashboard-domain traefik.seudominio.com \
+  --acme-email ops@seudominio.com
 ```
 
-### 2. Criar a rede compartilhada do Docker
+O mesmo comando muda apenas em `--provider` para AWS, Hetzner ou OCI.
+
+Sem borda pública:
 
 ```bash
-docker network create proxy
+sudo bash ./bootstrap.sh --provider aws --user arc
 ```
 
-Todos os projetos vão usar esta mesma rede para se comunicar com o Traefik.
-
-### 3. Criar o acme.json
-
-Este arquivo armazena os certificados SSL. Precisa existir antes de subir o Traefik e ter permissão 600 obrigatoriamente — caso contrário o Traefik recusa iniciar.
+Depois:
 
 ```bash
-touch /srv/proxy/acme.json
-chmod 600 /srv/proxy/acme.json
+bash ./doctor.sh
 ```
 
-### 4. Criar o .env com o token do Cloudflare
+Saída esperada:
 
-```bash
-cp .env.example .env
-nano .env
+```text
+ARC-READY
 ```
 
-Preencher `CF_DNS_API_TOKEN` com o token gerado em:
-https://dash.cloudflare.com/profile/api-tokens
+## Contrato de rede para aplicações
 
-Permissões necessárias no token:
-- Zone > DNS > Edit
-- Zone > Zone > Read
-- Escopo: apenas a zona do seu domínio
+Cada aplicação mantém sua própria rede privada. Somente o gateway HTTP entra na
+rede Docker externa `proxy`.
 
-### 5. Gerar senha para o dashboard
-
-O dashboard do Traefik fica em `traefik.fcoleds.dev.br` e é protegido por usuário e senha. Para gerar o hash:
-
-```bash
-# Instalar htpasswd se não tiver
-apt install apache2-utils -y
-
-# Gerar hash (vai pedir a senha duas vezes)
-sudo htpasswd -cB /srv/proxy/auth/htpasswd admin
+```text
+Internet
+   │
+   ▼
+Traefik :80/:443
+   │
+   └── rede "proxy"
+       ├── arclab-nginx
+       ├── arcpress-proxy
+       └── clarc-gateway
 ```
 
-### 6. Trocar os placeholders no traefik.yml
+Postgres, MinIO, workers, ClamAV, pgBouncer e equivalentes **não** entram nessa
+rede compartilhada.
 
-```yaml
-email: seuemail@exemplo.com   # trocar pelo seu email real
-```
-
-### 7. Trocar os placeholders no docker-compose.yml
-
-Substituir todas as ocorrências de `fcoelds.dev.br` pelo domínio real.
-
-### 8. Subir o Traefik
-
-```bash
-cd /srv/proxy
-docker compose up -d
-```
-
-Verificar se subiu:
-
-```bash
-docker compose logs -f
-```
-
-### 9. Configurar DNS no Cloudflare
-
-Criar dois registros A apontando para o IP da VPS:
-
-| Tipo | Nome                | Conteúdo    | Proxy   |
-|------|---------------------|-------------|---------|
-| A    | intops.tec.br       | IP_DA_VPS   |  ☁️ On  |
-| A    | *.intops.tec.br     | IP_DA_VPS   |  ☁️ On  |
-
-O registro wildcard (`*`) faz com que qualquer subdomínio resolva automaticamente para a VPS.
-
----
-
-## Como adicionar um novo projeto
-
-### Passo 1 — O projeto precisa ter estes arquivos
-
-```
-meu-projeto/
-├── Dockerfile
-├── docker-compose.yml     ← com as labels do Traefik
-├── .env.example
-├── .env                   ← só na VPS, nunca no Git
-└── .gitignore
-```
-
-### Passo 2 — No docker-compose.yml do projeto, adicionar as labels
+Exemplo de integração:
 
 ```yaml
 services:
-  meu-projeto:
-    image: ghcr.io/fcoelopes/<nome_repositorio_github>:latest
-    container_name: portfolio
-    restart: unless-stopped
-    expose:
-      - "80"              # porta que a app escuta internamente
+  gateway:
     networks:
+      - default
       - proxy
     labels:
       - "traefik.enable=true"
-      # Trocar meu-projeto pelo nome do router (único entre todos os projetos)
-      # Trocar o subdomínio pelo desejado
-      - "traefik.http.routers.meu-projeto.rule=Host(`meu-projeto.fcoelds.dev.br`)"
-      - "traefik.http.routers.meu-projeto.entrypoints=websecure"
-      - "traefik.http.routers.meu-projeto.tls.certresolver=cloudflare"
-      - "traefik.http.services.meu-projeto.loadbalancer.server.port=80"
+      - "traefik.docker.network=proxy"
+      - "traefik.http.routers.app.rule=Host(`${DOMAIN}`)"
+      - "traefik.http.routers.app.entrypoints=websecure"
+      - "traefik.http.routers.app.tls=true"
+      - "traefik.http.routers.app.tls.certresolver=letsencrypt"
+      - "traefik.http.services.app.loadbalancer.server.port=80"
 
 networks:
   proxy:
-    external: true          # mesma rede do Traefik
+    external: true
 ```
 
-**As 3 coisas que mudam para cada projeto:**
-1. Nome do router (`meu-projeto`) — deve ser único, use o nome do projeto
-2. Subdomínio (`meu-projeto.fcoelds.dev.br`)
-3. Porta interna (`8000`) — a porta que a app escuta dentro do container
+## Edge Traefik
 
-### Passo 3 — Clonar e subir na VPS
+Quando `--edge` é usado, o bootstrap:
 
-```bash
-# Clonar o projeto
-git clone git@github.com:fcoelopes/meu-projeto.git /srv/meu-projeto
-cd /srv/meu-projeto
+1. grava `.env` com domínio do dashboard e e-mail ACME;
+2. cria `acme.json` com permissão 600;
+3. cria autenticação Basic Auth do dashboard;
+4. sobe Traefik e o Docker Socket Proxy.
 
-# Criar o .env a partir do exemplo
-cp .env.example .env
-nano .env   # preencher as variáveis
+O Traefik é o único dono das portas 80/443.
 
-# Subir
-docker compose up -d --build
+A descoberta Docker não recebe o socket diretamente. Ela passa por
+`docker-socket-proxy`, numa rede interna separada, com acesso de leitura
+limitado aos endpoints necessários.
+
+TLS é emitido e renovado pelo Traefik via Let's Encrypt HTTP-01.
+
+## Diretórios do host
+
+O bootstrap cria:
+
+```text
+/srv/arc/
+├── apps/
+├── data/
+└── backups/
 ```
 
-Pronto. O Traefik detecta o container em segundos e o subdomínio já está funcionando com HTTPS.
+O objetivo é dar um lugar previsível para novos serviços e dados operacionais,
+sem obrigar cada aplicação a inventar um layout de máquina diferente.
 
----
+## Segurança
 
-## Deploy automático via GitHub Actions
+O bootstrap é propositalmente conservador:
 
-Cada projeto pode ter um workflow que faz o deploy automaticamente a cada push na branch `main`. Ver o arquivo `exemplo-app/.github/workflows/deploy.yml`.
+- não desativa o acesso SSH existente;
+- não desativa root automaticamente;
+- não mexe em Security Groups/NSG/firewalls externos;
+- não sobrescreve um `/etc/docker/daemon.json` já existente;
+- não publica banco ou storage;
+- habilita UFW apenas com SSH, 80 e 443 por padrão.
 
-### Secrets necessários no GitHub
+Hardening mais agressivo deve ser uma evolução explícita, não uma surpresa
+durante o primeiro bootstrap.
 
-Configurar em: Settings > Secrets and variables > Actions
+## Arquivos sensíveis
 
-| Secret        | Valor                          |
-|---------------|--------------------------------|
-| `VPS_HOST`    | IP da VPS (ex: 94.130.149.144) |
-| `VPS_USER`    | Usuário SSH (ex: root)         |
-| `VPS_SSH_KEY` | Chave SSH privada              |
+Nunca commitar:
 
-
-### Deploy
-```yaml
-name: Deploy
-
-on:
-  push:
-    branches:
-      - main
-
-jobs:
-  build-and-push:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Login to GHCR
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Build and push
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          push: true
-          no-cache: true
-          tags: ghcr.io/${{ github.repository }}:latest
-
-  deploy:
-    needs: build-and-push
-    runs-on: ubuntu-latest
-    steps:
-      - name: Deploy na VPS via SSH
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.VPS_HOST }}
-          username: ${{ secrets.VPS_USER }}
-          key: ${{ secrets.VPS_SSH_KEY }}
-          script: |
-            # Puxa a nova imagem que acabamos de subir
-            docker pull ghcr.io/${{ github.repository }}:latest
-            
-            # Recria o container (o docker compose já se encarrega de substituir o antigo)
-            docker compose up -d
-            
-            # Limpeza rápida
-            docker image prune -f
-
-            # Recria o container forçando a atualização total
-            docker compose up -d --force-recreate
-
+```text
+.env
+acme.json
+auth/htpasswd
 ```
 
-### Como gerar a chave SSH para o GitHub Actions
+## Próxima evolução natural
 
-```bash
-# Na sua máquina local
-ssh-keygen -t ed25519 -C "github-actions" -f ~/.ssh/github_actions
+A camada de **provisionamento** pode ser adicionada depois, sem misturar com o
+contrato do host:
 
-# Copiar a chave pública para a VPS
-ssh-copy-id -i ~/.ssh/github_actions.pub root@IP_DA_VPS
-
-# O conteúdo da chave privada vai no secret VPS_SSH_KEY
-cat ~/.ssh/github_actions
+```text
+providers/
+  aws/       Terraform/cloud-init
+  hetzner/   Terraform/cloud-init
+  oci/       Terraform/cloud-init
+  contabo/   API/cloud-init quando aplicável
 ```
 
----
-
-## Comandos úteis do dia a dia
-
-```bash
-# Ver todos os containers rodando
-docker ps
-
-# Ver logs do Traefik em tempo real
-cd /srv/proxy && docker compose logs -f
-
-# Ver logs de um projeto específico
-cd /srv/epi-control && docker compose logs -f
-
-# Reiniciar um projeto sem downtime
-cd /srv/epi-control && docker compose up -d --build
-
-# Derrubar um projeto (Traefik para de rotear automaticamente)
-cd /srv/epi-control && docker compose down
-
-# Limpar imagens antigas
-docker image prune -f
-```
-
----
-
-## O que não commitar nunca
-
-```
-.env          → tem senhas e tokens
-acme.json     → tem chaves privadas dos certificados SSL
-```
-
-Ambos estão no `.gitignore`. Na VPS eles ficam apenas em disco, criados manualmente uma única vez.
+O ponto importante é que todos terminem executando o mesmo `bootstrap.sh` e
+entregando o mesmo **Arc-ready host**.
