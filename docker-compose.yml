@@ -40,6 +40,8 @@ services:
     restart: unless-stopped
     depends_on:
       - docker-socket-proxy
+    environment:
+      TRAEFIK_CERTIFICATESRESOLVERS_LETSENCRYPT_ACME_EMAIL: ${ACME_EMAIL:?defina ACME_EMAIL no .env}
     ports:
       - "80:80"
       - "443:443"
