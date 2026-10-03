@@ -23,5 +23,5 @@ Depois de conectar:
 ```bash
 git clone git@github.com:fcoelopes/vps-proxy.git
 cd vps-proxy
-sudo ./bootstrap.sh --provider aws --edge
+sudo bash ./bootstrap.sh --provider aws --edge
 ```
