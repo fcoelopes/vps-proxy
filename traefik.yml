@@ -1,6 +1,9 @@
 api:
   dashboard: true
 
+global:
+  sendAnonymousUsage: false
+
 entryPoints:
   web:
     address: ":80"
@@ -15,22 +18,21 @@ entryPoints:
 
 providers:
   docker:
+    endpoint: "tcp://docker-socket-proxy:2375"
     exposedByDefault: false
     network: proxy
+    watch: true
   file:
     filename: /etc/traefik/dynamic.yml
     watch: true
 
 certificatesResolvers:
-  cloudflare:
+  letsencrypt:
     acme:
       email: "fco.edson.lopes@gmail.com"
       storage: /acme.json
-      dnsChallenge:
-        provider: cloudflare
-        resolvers:
-          - "1.1.1.1:53"
-          - "8.8.8.8:53"
+      httpChallenge:
+        entryPoint: web
 
 log:
   level: INFO
