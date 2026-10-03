@@ -81,7 +81,7 @@ sudo bash ./bootstrap.sh --provider aws --user arc
 Depois:
 
 ```bash
-bash ./doctor.sh
+sudo bash ./doctor.sh
 ```
 
 Saída esperada:
