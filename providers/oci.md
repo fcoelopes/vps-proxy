@@ -17,5 +17,5 @@ Bootstrap:
 ```bash
 git clone git@github.com:fcoelopes/vps-proxy.git
 cd vps-proxy
-sudo ./bootstrap.sh --provider oci --edge
+sudo bash ./bootstrap.sh --provider oci --edge
 ```
