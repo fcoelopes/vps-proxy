@@ -216,4 +216,4 @@ fi
 echo
 echo "Host pronto."
 echo "Novo login pode ser necessário para $ARC_USER receber o grupo docker."
-echo "Valide com: bash $SCRIPT_DIR/doctor.sh"
+echo "Valide com: sudo bash $SCRIPT_DIR/doctor.sh"
