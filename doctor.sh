@@ -24,16 +24,16 @@ if command -v ufw >/dev/null 2>&1; then
     UFW_STATUS="$(ufw status 2>/dev/null || true)"
   elif sudo -n true >/dev/null 2>&1; then
     UFW_STATUS="$(sudo -n ufw status 2>/dev/null || true)"
-  elif grep -q '^ENABLED=yes' /etc/ufw/ufw.conf 2>/dev/null; then
-    UFW_STATUS="Status: active"
   else
     UFW_STATUS=""
   fi
 
   if printf '%s\n' "$UFW_STATUS" | grep -q "Status: active"; then
     ok "UFW ativo"
+  elif [ -z "$UFW_STATUS" ]; then
+    bad "UFW não pôde ser consultado ao vivo; rode: sudo bash ./doctor.sh"
   else
-    bad "não foi possível confirmar UFW ativo; rode com sudo"
+    bad "UFW inativo"
   fi
 fi
 
