@@ -15,5 +15,5 @@ Bootstrap:
 ```bash
 git clone git@github.com:fcoelopes/vps-proxy.git
 cd vps-proxy
-sudo ./bootstrap.sh --provider contabo --edge
+sudo bash ./bootstrap.sh --provider contabo --edge
 ```
