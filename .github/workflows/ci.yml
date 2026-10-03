@@ -1,0 +1,29 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Validar scripts shell
+        run: |
+          bash -n bootstrap.sh
+          bash -n doctor.sh
+
+      - name: Validar compose do edge
+        env:
+          TRAEFIK_DASHBOARD_DOMAIN: traefik.example.invalid
+          ACME_EMAIL: ops@example.invalid
+        run: |
+          touch acme.json
+          mkdir -p auth
+          printf 'admin:$2y$05$abcdefghijklmnopqrstuv12345678901234567890123456789012\n' > auth/htpasswd
+          docker network create proxy
+          docker compose config --quiet
