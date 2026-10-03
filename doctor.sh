@@ -20,7 +20,21 @@ for d in /srv/arc/apps /srv/arc/data /srv/arc/backups; do
 done
 
 if command -v ufw >/dev/null 2>&1; then
-  ufw status | grep -q "Status: active" && ok "UFW ativo" || bad "UFW inativo"
+  if [ "$(id -u)" -eq 0 ]; then
+    UFW_STATUS="$(ufw status 2>/dev/null || true)"
+  elif sudo -n true >/dev/null 2>&1; then
+    UFW_STATUS="$(sudo -n ufw status 2>/dev/null || true)"
+  elif grep -q '^ENABLED=yes' /etc/ufw/ufw.conf 2>/dev/null; then
+    UFW_STATUS="Status: active"
+  else
+    UFW_STATUS=""
+  fi
+
+  if printf '%s\n' "$UFW_STATUS" | grep -q "Status: active"; then
+    ok "UFW ativo"
+  else
+    bad "não foi possível confirmar UFW ativo; rode com sudo"
+  fi
 fi
 
 if docker ps --format '{{.Names}}' 2>/dev/null | grep -qx traefik; then
