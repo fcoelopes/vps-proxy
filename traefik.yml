@@ -29,7 +29,6 @@ providers:
 certificatesResolvers:
   letsencrypt:
     acme:
-      email: "fco.edson.lopes@gmail.com"
       storage: /acme.json
       httpChallenge:
         entryPoint: web
