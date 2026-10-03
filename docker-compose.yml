@@ -54,7 +54,7 @@ services:
     labels:
       - "traefik.enable=true"
       - "traefik.docker.network=proxy"
-      - "traefik.http.routers.dashboard.rule=Host(\`${TRAEFIK_DASHBOARD_DOMAIN:?defina TRAEFIK_DASHBOARD_DOMAIN no .env}\`)"
+      - "traefik.http.routers.dashboard.rule=Host(`${TRAEFIK_DASHBOARD_DOMAIN:?defina TRAEFIK_DASHBOARD_DOMAIN no .env}`)"
       - "traefik.http.routers.dashboard.entrypoints=websecure"
       - "traefik.http.routers.dashboard.tls=true"
       - "traefik.http.routers.dashboard.tls.certresolver=letsencrypt"
