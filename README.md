@@ -1,307 +1,114 @@
-# infra-proxy
+# vps-proxy
 
-Reverse proxy centralizado com Traefik. Fica rodando na VPS e roteia o tráfego para cada ferramenta pelo subdomínio.
+Borda HTTP/HTTPS central da VPS Contabo. O Traefik é o único serviço que publica
+as portas 80 e 443; ArcLab, ArcPRESS, Clarc e outros stacks entram na rede Docker
+externa `proxy` e são descobertos por labels.
 
----
+## Arquitetura
 
-## O que é isso e por que existe
-
-Você tem uma VPS com um único IP. Quer colocar vários projetos nela e acessar cada um por um subdomínio diferente:
-
-```
-projeto#1.fcoelds.dev.br     →  EPI Control
-projeto#2.fcoelds.dev.br     →  ArcFlash NR-10
-projeto#3.fcoleds.tec.br     →  rbd-graph
-```
-
-O Traefik fica na porta 80/443, intercepta todas as requisições e encaminha para o container certo baseado no domínio. Você sobe um projeto novo e o Traefik detecta automaticamente — sem editar nenhum arquivo de configuração central.
-
----
-
-## Estrutura na VPS
-
-```
-/srv/
-├── proxy/                    ← este repositório
-│   ├── docker-compose.yml
-│   ├── traefik.yml
-│   ├── acme.json             ← gerado automaticamente (NÃO commitar)
-│   └── .env                  ← token Cloudflare (NÃO commitar)
-│
-├── epi-control/              ← cada projeto no seu diretório
-├── arcflash/
-├── rbd-graph/
-└── exemplo-app/
+```text
+Internet
+  |
+  | 80/443
+  v
+Traefik
+  |
+  +-- proxy (rede Docker externa)
+      +-- arclab-nginx
+      +-- arcpress-proxy
+      +-- clarc (futuro)
 ```
 
-Cada projeto é um repositório Git independente clonado em `/srv/nome-do-projeto`.
+O Traefik não monta o Docker socket diretamente. A descoberta passa por
+`tecnativa/docker-socket-proxy`, numa rede interna separada, liberando apenas
+os endpoints de leitura necessários para containers, eventos e redes.
 
----
+TLS é emitido e renovado pelo próprio Traefik via Let's Encrypt HTTP-01. Não há
+Cloudflare Tunnel e não há Certbot nos projetos. Cloudflare pode continuar sendo
+usado apenas como DNS/proxy externo, se desejado.
 
-## Setup inicial (fazer uma única vez)
-
-### 1. Clonar o repositório na VPS
+## Primeiro bootstrap da VPS
 
 ```bash
-git clone git@github.com:fcoelopes/infra-proxy.git /srv/proxy
+sudo mkdir -p /srv
+sudo chown "$USER":"$USER" /srv
+
+git clone git@github.com:fcoelopes/vps-proxy.git /srv/proxy
 cd /srv/proxy
-```
 
-### 2. Criar a rede compartilhada do Docker
+docker network inspect proxy >/dev/null 2>&1 || docker network create proxy
 
-```bash
-docker network create proxy
-```
-
-Todos os projetos vão usar esta mesma rede para se comunicar com o Traefik.
-
-### 3. Criar o acme.json
-
-Este arquivo armazena os certificados SSL. Precisa existir antes de subir o Traefik e ter permissão 600 obrigatoriamente — caso contrário o Traefik recusa iniciar.
-
-```bash
-touch /srv/proxy/acme.json
-chmod 600 /srv/proxy/acme.json
-```
-
-### 4. Criar o .env com o token do Cloudflare
-
-```bash
 cp .env.example .env
 nano .env
-```
 
-Preencher `CF_DNS_API_TOKEN` com o token gerado em:
-https://dash.cloudflare.com/profile/api-tokens
+touch acme.json
+chmod 600 acme.json
 
-Permissões necessárias no token:
-- Zone > DNS > Edit
-- Zone > Zone > Read
-- Escopo: apenas a zona do seu domínio
+mkdir -p auth
+sudo apt-get update
+sudo apt-get install -y apache2-utils
+htpasswd -cB auth/htpasswd admin
 
-### 5. Gerar senha para o dashboard
-
-O dashboard do Traefik fica em `traefik.fcoleds.dev.br` e é protegido por usuário e senha. Para gerar o hash:
-
-```bash
-# Instalar htpasswd se não tiver
-apt install apache2-utils -y
-
-# Gerar hash (vai pedir a senha duas vezes)
-sudo htpasswd -cB /srv/proxy/auth/htpasswd admin
-```
-
-### 6. Trocar os placeholders no traefik.yml
-
-```yaml
-email: seuemail@exemplo.com   # trocar pelo seu email real
-```
-
-### 7. Trocar os placeholders no docker-compose.yml
-
-Substituir todas as ocorrências de `fcoelds.dev.br` pelo domínio real.
-
-### 8. Subir o Traefik
-
-```bash
-cd /srv/proxy
+docker compose config
 docker compose up -d
+docker compose ps
 ```
 
-Verificar se subiu:
+As portas TCP 80 e 443 precisam estar acessíveis da Internet para o HTTP-01.
+No firewall da VPS, deixe públicas apenas SSH, 80 e 443.
 
-```bash
-docker compose logs -f
+## DNS
+
+Crie registros A para cada hostname apontando para o IP público da Contabo:
+
+```text
+traefik.fcoelds.dev.br  -> IP_DA_VPS
+<dominio-do-arclab>     -> IP_DA_VPS
+arcpress.arc.tec.br     -> IP_DA_VPS
 ```
 
-### 9. Configurar DNS no Cloudflare
+Não é necessário criar túnel. Se usar o proxy da Cloudflare, mantenha o origin
+alcançável em 80/443; para o primeiro bootstrap do certificado, DNS-only é a
+opção mais simples.
 
-Criar dois registros A apontando para o IP da VPS:
+## Contrato para aplicações
 
-| Tipo | Nome                | Conteúdo    | Proxy   |
-|------|---------------------|-------------|---------|
-| A    | intops.tec.br       | IP_DA_VPS   |  ☁️ On  |
-| A    | *.intops.tec.br     | IP_DA_VPS   |  ☁️ On  |
+Cada aplicação mantém sua rede privada. Somente seu gateway HTTP entra também
+na rede externa `proxy`.
 
-O registro wildcard (`*`) faz com que qualquer subdomínio resolva automaticamente para a VPS.
-
----
-
-## Como adicionar um novo projeto
-
-### Passo 1 — O projeto precisa ter estes arquivos
-
-```
-meu-projeto/
-├── Dockerfile
-├── docker-compose.yml     ← com as labels do Traefik
-├── .env.example
-├── .env                   ← só na VPS, nunca no Git
-└── .gitignore
-```
-
-### Passo 2 — No docker-compose.yml do projeto, adicionar as labels
+Exemplo:
 
 ```yaml
 services:
-  meu-projeto:
-    image: ghcr.io/fcoelopes/<nome_repositorio_github>:latest
-    container_name: portfolio
-    restart: unless-stopped
-    expose:
-      - "80"              # porta que a app escuta internamente
+  gateway:
     networks:
+      - default
       - proxy
     labels:
       - "traefik.enable=true"
-      # Trocar meu-projeto pelo nome do router (único entre todos os projetos)
-      # Trocar o subdomínio pelo desejado
-      - "traefik.http.routers.meu-projeto.rule=Host(`meu-projeto.fcoelds.dev.br`)"
-      - "traefik.http.routers.meu-projeto.entrypoints=websecure"
-      - "traefik.http.routers.meu-projeto.tls.certresolver=cloudflare"
-      - "traefik.http.services.meu-projeto.loadbalancer.server.port=80"
+      - "traefik.docker.network=proxy"
+      - "traefik.http.routers.app.rule=Host(\`${DOMAIN}\`)"
+      - "traefik.http.routers.app.entrypoints=websecure"
+      - "traefik.http.routers.app.tls=true"
+      - "traefik.http.routers.app.tls.certresolver=letsencrypt"
+      - "traefik.http.services.app.loadbalancer.server.port=80"
 
 networks:
   proxy:
-    external: true          # mesma rede do Traefik
+    external: true
 ```
 
-**As 3 coisas que mudam para cada projeto:**
-1. Nome do router (`meu-projeto`) — deve ser único, use o nome do projeto
-2. Subdomínio (`meu-projeto.fcoelds.dev.br`)
-3. Porta interna (`8000`) — a porta que a app escuta dentro do container
+Banco, storage, workers e demais serviços não devem ser conectados à `proxy`.
 
-### Passo 3 — Clonar e subir na VPS
+## Operação
 
 ```bash
-# Clonar o projeto
-git clone git@github.com:fcoelopes/meu-projeto.git /srv/meu-projeto
-cd /srv/meu-projeto
-
-# Criar o .env a partir do exemplo
-cp .env.example .env
-nano .env   # preencher as variáveis
-
-# Subir
-docker compose up -d --build
+cd /srv/proxy
+docker compose pull
+docker compose up -d
+docker compose ps
+docker compose logs -f traefik
 ```
 
-Pronto. O Traefik detecta o container em segundos e o subdomínio já está funcionando com HTTPS.
-
----
-
-## Deploy automático via GitHub Actions
-
-Cada projeto pode ter um workflow que faz o deploy automaticamente a cada push na branch `main`. Ver o arquivo `exemplo-app/.github/workflows/deploy.yml`.
-
-### Secrets necessários no GitHub
-
-Configurar em: Settings > Secrets and variables > Actions
-
-| Secret        | Valor                          |
-|---------------|--------------------------------|
-| `VPS_HOST`    | IP da VPS (ex: 94.130.149.144) |
-| `VPS_USER`    | Usuário SSH (ex: root)         |
-| `VPS_SSH_KEY` | Chave SSH privada              |
-
-
-### Deploy
-```yaml
-name: Deploy
-
-on:
-  push:
-    branches:
-      - main
-
-jobs:
-  build-and-push:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Login to GHCR
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Build and push
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          push: true
-          no-cache: true
-          tags: ghcr.io/${{ github.repository }}:latest
-
-  deploy:
-    needs: build-and-push
-    runs-on: ubuntu-latest
-    steps:
-      - name: Deploy na VPS via SSH
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.VPS_HOST }}
-          username: ${{ secrets.VPS_USER }}
-          key: ${{ secrets.VPS_SSH_KEY }}
-          script: |
-            # Puxa a nova imagem que acabamos de subir
-            docker pull ghcr.io/${{ github.repository }}:latest
-            
-            # Recria o container (o docker compose já se encarrega de substituir o antigo)
-            docker compose up -d
-            
-            # Limpeza rápida
-            docker image prune -f
-
-            # Recria o container forçando a atualização total
-            docker compose up -d --force-recreate
-
-```
-
-### Como gerar a chave SSH para o GitHub Actions
-
-```bash
-# Na sua máquina local
-ssh-keygen -t ed25519 -C "github-actions" -f ~/.ssh/github_actions
-
-# Copiar a chave pública para a VPS
-ssh-copy-id -i ~/.ssh/github_actions.pub root@IP_DA_VPS
-
-# O conteúdo da chave privada vai no secret VPS_SSH_KEY
-cat ~/.ssh/github_actions
-```
-
----
-
-## Comandos úteis do dia a dia
-
-```bash
-# Ver todos os containers rodando
-docker ps
-
-# Ver logs do Traefik em tempo real
-cd /srv/proxy && docker compose logs -f
-
-# Ver logs de um projeto específico
-cd /srv/epi-control && docker compose logs -f
-
-# Reiniciar um projeto sem downtime
-cd /srv/epi-control && docker compose up -d --build
-
-# Derrubar um projeto (Traefik para de rotear automaticamente)
-cd /srv/epi-control && docker compose down
-
-# Limpar imagens antigas
-docker image prune -f
-```
-
----
-
-## O que não commitar nunca
-
-```
-.env          → tem senhas e tokens
-acme.json     → tem chaves privadas dos certificados SSL
-```
-
-Ambos estão no `.gitignore`. Na VPS eles ficam apenas em disco, criados manualmente uma única vez.
+O arquivo `acme.json` contém material privado dos certificados e nunca deve ser
+commitado. O mesmo vale para `.env` e `auth/htpasswd`.
