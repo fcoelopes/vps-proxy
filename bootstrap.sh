@@ -13,7 +13,7 @@ ACME_EMAIL=""
 usage() {
   cat <<'EOF'
 Uso:
-  sudo ./bootstrap.sh [opções]
+  sudo bash ./bootstrap.sh [opções]
 
 Opções:
   --provider aws|contabo|hetzner|oci|generic
@@ -27,7 +27,7 @@ Opções:
   -h, --help
 
 Exemplo:
-  sudo ./bootstrap.sh --provider contabo --user arc \
+  sudo bash ./bootstrap.sh --provider contabo --user arc \
     --edge --dashboard-domain traefik.exemplo.com --acme-email ops@exemplo.com
 EOF
 }
@@ -216,4 +216,4 @@ fi
 echo
 echo "Host pronto."
 echo "Novo login pode ser necessário para $ARC_USER receber o grupo docker."
-echo "Valide com: $SCRIPT_DIR/doctor.sh"
+echo "Valide com: bash $SCRIPT_DIR/doctor.sh"
